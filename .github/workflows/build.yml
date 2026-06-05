@@ -46,12 +46,10 @@ jobs:
       # ── 5. Dependencies ─────────────────────────────────────────────────────
       - name: Install Flutter dependencies
         run: flutter pub get
-        working-directory: roman_urdu_agent
 
       # ── 6. Analyze (non-blocking — shows warnings but won't fail the build) ─
       - name: Analyze code
         run: flutter analyze --no-fatal-infos || true
-        working-directory: roman_urdu_agent
 
       # ── 7. Build release APK ────────────────────────────────────────────────
       #    GEMINI_API_KEY is stored as a GitHub Secret.
@@ -63,13 +61,12 @@ jobs:
           flutter build apk \
             --release \
             --dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-        working-directory: roman_urdu_agent
 
       # ── 8. Rename APK with build number for clarity ─────────────────────────
       - name: Rename APK
         run: |
           mkdir -p artifacts
-          cp roman_urdu_agent/build/app/outputs/flutter-apk/app-release.apk \
+          cp build/app/outputs/flutter-apk/app-release.apk \
              artifacts/roman-urdu-agent-${{ github.run_number }}.apk
 
       # ── 9. Upload artifact — downloadable from Actions page ─────────────────
