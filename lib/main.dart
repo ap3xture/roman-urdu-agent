@@ -206,35 +206,9 @@ class _AgentScreenState extends State<AgentScreen>
       controller: _scrollCtrl,
       padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
       children: [
-        // Empty state hint
+        // Empty state — capability infographic
         if (_transcript.isEmpty && _response.isEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 48),
-            child: Column(
-              children: [
-                Icon(Icons.mic_none,
-                    size: 40, color: Colors.white.withOpacity(0.08)),
-                const SizedBox(height: 16),
-                Text(
-                  '"mera alarm 7 baje set karo"',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.15),
-                    fontSize: 14,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '"5 baje meeting ka reminder"',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.1),
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const _CapabilityGrid(),
 
         // User transcript
         if (_transcript.isNotEmpty) ...[
@@ -412,6 +386,150 @@ class _SpeakerLabel extends StatelessWidget {
     );
   }
 }
+
+// ─── Capability infographic ────────────────────────────────────────────────────
+
+class _CapabilityGrid extends StatelessWidget {
+  const _CapabilityGrid();
+
+  static const _caps = [
+    _Cap(Icons.alarm,            'Alarm',       'saat baje alarm lagao',          0xFF4CAF50),
+    _Cap(Icons.calendar_today,   'Reminder',    '5 baje meeting ka reminder',     0xFF2196F3),
+    _Cap(Icons.timer,            'Timer',       '30 minute ka timer lagao',       0xFFFF9800),
+    _Cap(Icons.call,             'Phone Call',  '0300... pe call karo',           0xFF9C27B0),
+    _Cap(Icons.chat,             'WhatsApp',    'WhatsApp pe salam bhejo',        0xFF25D366),
+    _Cap(Icons.map,              'Navigation',  'Lahore ka rasta dikhao',         0xFFE91E63),
+    _Cap(Icons.search,           'Web Search',  'cricket score search karo',      0xFF03A9F4),
+    _Cap(Icons.play_circle,      'YouTube',     'Atif Aslam ka gana lagao',       0xFFFF0000),
+    _Cap(Icons.camera_alt,       'Camera',      'camera kholo ya selfie lo',      0xFF607D8B),
+    _Cap(Icons.settings,         'Settings',    'WiFi ya Bluetooth settings',     0xFF795548),
+    _Cap(Icons.bolt,             'Real-time',   'battery kitni hai? / time?',     0xFFFFEB3B),
+    _Cap(Icons.auto_awesome,     'Ask Anything','Pakistan ki capital kya hai?',   0xFF00D4AA),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 8),
+
+        // Section label
+        Text(
+          'YEH KAR SAKTA HOON',
+          style: TextStyle(
+            color: Colors.white.withOpacity(0.22),
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 3,
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // 2-column grid
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _caps.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 1.55,
+          ),
+          itemBuilder: (_, i) => _CapCard(cap: _caps[i]),
+        ),
+
+        const SizedBox(height: 24),
+
+        // Bottom hint
+        Center(
+          child: Text(
+            'Mic dabayein ya likhein',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.15),
+              fontSize: 12,
+              letterSpacing: 1,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+      ],
+    );
+  }
+}
+
+class _Cap {
+  final IconData icon;
+  final String title;
+  final String example;
+  final int color;
+  const _Cap(this.icon, this.title, this.example, this.color);
+}
+
+class _CapCard extends StatelessWidget {
+  final _Cap cap;
+  const _CapCard({required this.cap});
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = Color(cap.color);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withOpacity(0.18), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Icon + title row
+          Row(
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  color: accent.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(7),
+                ),
+                child: Icon(cap.icon, color: accent, size: 15),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  cap.title,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const Spacer(),
+          // Example command
+          Text(
+            '"${cap.example}"',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.35),
+              fontSize: 10,
+              fontStyle: FontStyle.italic,
+              height: 1.4,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Thinking dots ────────────────────────────────────────────────────────────
 
 class _ThinkingDots extends StatefulWidget {
   const _ThinkingDots();
