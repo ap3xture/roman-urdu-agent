@@ -22,7 +22,7 @@ class GeminiService {
         ? 'ML Kit normalized: "$normalizedHint"\n'
         : '';
     final prompt =
-        '$_kSystemPrompt\n\n${hintLine}User: "$input"\n\nReturn JSON only.';
+        '$_kSystemPrompt\n\n${_realtimeContext()}${hintLine}User: "$input"\n\nReturn JSON only.';
 
     final body = jsonEncode({
       'contents': [
@@ -117,11 +117,53 @@ class GeminiException implements Exception {
   String toString() => 'GeminiException: $message';
 }
 
+// ─── Real-time context ────────────────────────────────────────────────────────
+
+String _realtimeContext() {
+  final now = DateTime.now();
+
+  const days = [
+    'Monday', 'Tuesday', 'Wednesday', 'Thursday',
+    'Friday', 'Saturday', 'Sunday'
+  ];
+  const months = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+  const urduDays = [
+    'Somwar', 'Mangal', 'Budh', 'Jumerat',
+    'Jumma', 'Hafta', 'Itwar'
+  ];
+
+  final dayEn  = days[now.weekday - 1];
+  final dayUr  = urduDays[now.weekday - 1];
+  final month  = months[now.month - 1];
+  final hour12 = now.hour == 0 ? 12 : (now.hour > 12 ? now.hour - 12 : now.hour);
+  final amPm   = now.hour < 12 ? 'AM' : 'PM';
+  final amPmUr = now.hour < 12 ? 'Subah' : (now.hour < 17 ? 'Dopahar' : (now.hour < 20 ? 'Sham' : 'Raat'));
+  final min    = now.minute.toString().padLeft(2, '0');
+  final time24 = '${now.hour.toString().padLeft(2, '0')}:$min';
+
+  return '''
+--- REAL-TIME DEVICE DATA (injected at request time) ---
+Current time  : $hour12:$min $amPm  ($time24 in 24h)  [$amPmUr]
+Current date  : $dayEn, ${now.day} $month ${now.year}
+Day (English) : $dayEn
+Day (Roman Urdu): $dayUr
+---
+
+''';
+}
+
 // ─── System prompt ────────────────────────────────────────────────────────────
 
 const String _kSystemPrompt = '''
-You are a smart voice assistant. You handle two types of input:
+You are a smart voice assistant with access to real-time device data.
 
+At the start of each request you receive a block of REAL-TIME DEVICE DATA
+(current time, date, day of week). Use it to answer time/date questions accurately.
+
+You handle two types of input:
 1. TASK commands in Roman Urdu (set alarms, reminders, timers)
 2. GENERAL questions or conversation in any language
 
@@ -190,4 +232,19 @@ Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"res
 
 Input: "what is 25 multiplied by 4"
 Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"25 multiplied by 4 is 100."}
+
+Input: "kitne baje hain?" (assume real-time context shows 3:45 PM)
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Abhi 3:45 baj rahe hain, Sham ka waqt hai."}
+
+Input: "what time is it?" (assume real-time context shows 9:10 AM)
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"It is currently 9:10 AM."}
+
+Input: "aaj kon sa din hai?" (assume real-time context shows Friday)
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Aaj Jumma hai."}
+
+Input: "what is today's date?" (assume real-time context shows 6 June 2026)
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Today is Friday, 6 June 2026."}
+
+Input: "kal kon sa din hoga?" (assume today is Friday)
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Kal Hafta hoga."}
 ''';
