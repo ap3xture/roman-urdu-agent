@@ -25,8 +25,8 @@ dependencies:
   # Timezone support for scheduled notifications
   timezone: ^0.9.4
 
-  # Text-to-Speech confirmation readback
-  flutter_tts: ^4.0.2
+  # Text-to-Speech confirmation readback (3.x avoids Kotlin 2.x requirement)
+  flutter_tts: ^3.8.5
 
   # Runtime permission handling
   permission_handler: ^11.3.1
