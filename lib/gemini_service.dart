@@ -1,8 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-// API key is injected at build time via --dart-define=GEMINI_API_KEY=...
-// Set it as a GitHub Secret named GEMINI_API_KEY — never hardcode here.
+// API key injected at build time via --dart-define=GEMINI_API_KEY=...
 const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
 
 class GeminiService {
@@ -12,15 +11,18 @@ class GeminiService {
       '/$_model:generateContent';
 
   Future<AgentIntent> classifyIntent(
-    String romanUrduInput, {
+    String input, {
     String? normalizedHint,
   }) async {
     if (_apiKey.isEmpty) {
-      throw GeminiException(
-          'GEMINI_API_KEY not set. Build with --dart-define=GEMINI_API_KEY=YOUR_KEY');
+      throw GeminiException('GEMINI_API_KEY not set.');
     }
 
-    final prompt = _buildPrompt(romanUrduInput, normalizedHint);
+    final hintLine = normalizedHint != null
+        ? 'ML Kit normalized: "$normalizedHint"\n'
+        : '';
+    final prompt =
+        '$_kSystemPrompt\n\n${hintLine}User: "$input"\n\nReturn JSON only.';
 
     final body = jsonEncode({
       'contents': [
@@ -31,15 +33,15 @@ class GeminiService {
         }
       ],
       'generationConfig': {
-        'temperature': 0.1,
-        'maxOutputTokens': 256,
+        'temperature': 0.4,   // slightly higher — better for chat responses
+        'maxOutputTokens': 512,
       },
     });
 
     final uri = Uri.parse('$_baseUrl?key=$_apiKey');
     final response = await http
         .post(uri, headers: {'Content-Type': 'application/json'}, body: body)
-        .timeout(const Duration(seconds: 15));
+        .timeout(const Duration(seconds: 20));
 
     if (response.statusCode != 200) {
       throw GeminiException(
@@ -49,42 +51,34 @@ class GeminiService {
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     final candidates = decoded['candidates'] as List<dynamic>?;
     if (candidates == null || candidates.isEmpty) {
-      throw GeminiException('No candidates in response: ${response.body}');
+      throw GeminiException('No candidates in response.');
     }
 
     final rawText =
         candidates[0]['content']['parts'][0]['text'] as String? ?? '';
-
-    // Strip markdown fences if Gemini wrapped them anyway
     final cleaned = rawText
         .replaceAll(RegExp(r'```json\s*'), '')
         .replaceAll(RegExp(r'```\s*'), '')
         .trim();
 
     try {
-      final json = jsonDecode(cleaned) as Map<String, dynamic>;
-      return AgentIntent.fromJson(json);
+      return AgentIntent.fromJson(jsonDecode(cleaned) as Map<String, dynamic>);
     } catch (_) {
       return AgentIntent(intent: IntentType.unknown, raw: cleaned);
     }
-  }
-
-  String _buildPrompt(String input, String? hint) {
-    final hintLine =
-        hint != null ? 'ML Kit normalized text: "$hint"\n' : '';
-    return '$_kSystemPrompt\n\n${hintLine}User input: "$input"\n\nReturn JSON only.';
   }
 }
 
 // ─── Intent model ─────────────────────────────────────────────────────────────
 
-enum IntentType { setAlarm, setReminder, setTimer, unknown }
+enum IntentType { setAlarm, setReminder, setTimer, chat, unknown }
 
 class AgentIntent {
   final IntentType intent;
   final String? timeString;
   final String? message;
   final int? durationMinutes;
+  final String? response;   // populated for CHAT intent
   final String raw;
 
   const AgentIntent({
@@ -93,6 +87,7 @@ class AgentIntent {
     this.timeString,
     this.message,
     this.durationMinutes,
+    this.response,
   });
 
   factory AgentIntent.fromJson(Map<String, dynamic> json) {
@@ -101,6 +96,7 @@ class AgentIntent {
       'SET_ALARM' => IntentType.setAlarm,
       'SET_REMINDER' => IntentType.setReminder,
       'SET_TIMER' => IntentType.setTimer,
+      'CHAT' => IntentType.chat,
       _ => IntentType.unknown,
     };
     return AgentIntent(
@@ -108,6 +104,7 @@ class AgentIntent {
       timeString: json['time'] as String?,
       message: json['message'] as String?,
       durationMinutes: json['duration_minutes'] as int?,
+      response: json['response'] as String?,
       raw: json.toString(),
     );
   }
@@ -120,76 +117,77 @@ class GeminiException implements Exception {
   String toString() => 'GeminiException: $message';
 }
 
-// ─── Few-shot system prompt ───────────────────────────────────────────────────
+// ─── System prompt ────────────────────────────────────────────────────────────
 
 const String _kSystemPrompt = '''
-You are a strict intent-parsing engine for Roman Urdu voice commands.
-Your ONLY job is to return a JSON object — nothing else. No explanation, no markdown, no code fences.
+You are a smart voice assistant. You handle two types of input:
 
-INTENTS you must classify:
-- SET_ALARM      → User wants to set an alarm at a specific time
-- SET_REMINDER   → User wants a reminder with a message at a time
-- SET_TIMER      → User wants a countdown timer for N minutes/hours
-- UNKNOWN        → Cannot determine a supported intent
+1. TASK commands in Roman Urdu (set alarms, reminders, timers)
+2. GENERAL questions or conversation in any language
 
-OUTPUT SCHEMA (always return all fields, use null if not applicable):
+Always return a single JSON object — no markdown, no explanation, nothing else.
+
+OUTPUT SCHEMA:
 {
-  "intent": "SET_ALARM" | "SET_REMINDER" | "SET_TIMER" | "UNKNOWN",
+  "intent": "SET_ALARM" | "SET_REMINDER" | "SET_TIMER" | "CHAT" | "UNKNOWN",
   "time": "HH:mm" | null,
   "message": "string" | null,
-  "duration_minutes": integer | null
+  "duration_minutes": integer | null,
+  "response": "string" | null
 }
 
-RULES:
-- "baje" means o\'clock. "7 baje" = "07:00"
-- "subah" = AM, "sham" / "raat" = PM. "saat baje sham" = "19:00"
-- "aadhay ghantay" = 30 minutes, "ek ghanta" = 60 minutes
-- "do ghante" = 120 minutes, "teen ghante" = 180 minutes
-- Numbers in Roman Urdu: ek=1, do=2, teen=3, char=4, paanch=5, chhe=6, saat=7, aath=8, nau=9, das=10, gyarah=11, barah=12
-- "yaad dilao" or "reminder" → SET_REMINDER
-- "alarm" or "jagao" → SET_ALARM
-- "timer" or "baad" with duration → SET_TIMER
-- Keep the reminder message text in "message" as the task topic (English or Roman Urdu)
-- If time is ambiguous and no AM/PM clue, prefer the next upcoming time
+RULES FOR TASKS:
+- "baje" = o\'clock. "saat baje" = "07:00"
+- "subah" = AM, "sham"/"raat" = PM. "saat baje sham" = "19:00"
+- Numbers: ek=1, do=2, teen=3, char=4, paanch=5, chhe=6, saat=7, aath=8, nau=9, das=10, gyarah=11, barah=12
+- "aadhay ghantay" = 30 min, "ek ghanta" = 60 min, "do ghante" = 120 min
+- "yaad dilao" / "reminder" → SET_REMINDER
+- "alarm" / "jagao" → SET_ALARM
+- "timer" / duration + "baad" → SET_TIMER
+- For tasks: response field = null
 
-EXAMPLES — study these carefully:
+RULES FOR CHAT:
+- Any general question, greeting, or conversation → CHAT intent
+- Put your answer in the "response" field
+- Keep response under 3 sentences (it will be read aloud by TTS)
+- You may respond in English or Roman Urdu — match the user\'s language
+- All task fields (time, message, duration_minutes) = null for CHAT
+
+EXAMPLES:
 
 Input: "mera alarm 7 baje set karo"
-Output: {"intent":"SET_ALARM","time":"07:00","message":null,"duration_minutes":null}
+Output: {"intent":"SET_ALARM","time":"07:00","message":null,"duration_minutes":null,"response":null}
 
 Input: "subah 6 baje alarm lagao"
-Output: {"intent":"SET_ALARM","time":"06:00","message":null,"duration_minutes":null}
+Output: {"intent":"SET_ALARM","time":"06:00","message":null,"duration_minutes":null,"response":null}
 
 Input: "raat 10 baje alarm"
-Output: {"intent":"SET_ALARM","time":"22:00","message":null,"duration_minutes":null}
+Output: {"intent":"SET_ALARM","time":"22:00","message":null,"duration_minutes":null,"response":null}
 
-Input: "sham 5 baje mujhe meeting ki yaad dilao"
-Output: {"intent":"SET_REMINDER","time":"17:00","message":"meeting","duration_minutes":null}
+Input: "sham 5 baje meeting ka reminder"
+Output: {"intent":"SET_REMINDER","time":"17:00","message":"meeting","duration_minutes":null,"response":null}
 
-Input: "kal subah 8:30 baje doctor appointment ka reminder set karo"
-Output: {"intent":"SET_REMINDER","time":"08:30","message":"doctor appointment","duration_minutes":null}
-
-Input: "namaz ki yaad 1 baje dopahar ko dilao"
-Output: {"intent":"SET_REMINDER","time":"13:00","message":"namaz","duration_minutes":null}
+Input: "barah baje lunch ka reminder set karo"
+Output: {"intent":"SET_REMINDER","time":"12:00","message":"lunch","duration_minutes":null,"response":null}
 
 Input: "30 minute ka timer lagao"
-Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":30}
+Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":30,"response":null}
 
 Input: "ek ghanta baad yaad karna"
-Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":60}
+Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":60,"response":null}
 
-Input: "paanch minute ka timer"
-Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":5}
+Input: "hello, how are you?"
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"I\'m doing great, ready to help you! You can ask me anything or say a command like set an alarm."}
 
-Input: "do ghante baad alarm"
-Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":120}
+Input: "Pakistan ki capital kya hai?"
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Pakistan ki capital Islamabad hai."}
 
-Input: "barah baje lunch ka reminder"
-Output: {"intent":"SET_REMINDER","time":"12:00","message":"lunch","duration_minutes":null}
+Input: "tell me a joke"
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Why do programmers prefer dark mode? Because light attracts bugs!"}
 
-Input: "hello"
-Output: {"intent":"UNKNOWN","time":null,"message":null,"duration_minutes":null}
+Input: "aaj ka mausam kaisa hai?"
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Mujhe real-time mausam ka data nahi milta, lekin aap weather app check kar sakte hain."}
 
-Input: "aaj ka mausam kaisa hai"
-Output: {"intent":"UNKNOWN","time":null,"message":null,"duration_minutes":null}
+Input: "what is 25 multiplied by 4"
+Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"25 multiplied by 4 is 100."}
 ''';

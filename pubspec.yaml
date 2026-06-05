@@ -28,6 +28,9 @@ dependencies:
   # Text-to-Speech confirmation readback (3.x avoids Kotlin 2.x requirement)
   flutter_tts: ^3.8.5
 
+  # Native Android intents (Clock app alarm, Calendar reminder, timer)
+  android_intent_plus: ^5.0.3
+
   # Runtime permission handling
   permission_handler: ^11.3.1
 
