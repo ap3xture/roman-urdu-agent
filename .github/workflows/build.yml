@@ -1,0 +1,88 @@
+name: Build Roman Urdu Agent APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:          # Lets you trigger a build manually from the Actions tab
+
+jobs:
+  build-apk:
+    name: Build & Upload APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # ── 1. Checkout ─────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Java (required by Android Gradle) ───────────────────────────────
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      # ── 3. Flutter ──────────────────────────────────────────────────────────
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.24.5"
+          channel: stable
+          cache: true
+
+      # ── 4. Cache Gradle to speed up subsequent builds ───────────────────────
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      # ── 5. Dependencies ─────────────────────────────────────────────────────
+      - name: Install Flutter dependencies
+        run: flutter pub get
+        working-directory: roman_urdu_agent
+
+      # ── 6. Analyze (non-blocking — shows warnings but won't fail the build) ─
+      - name: Analyze code
+        run: flutter analyze --no-fatal-infos || true
+        working-directory: roman_urdu_agent
+
+      # ── 7. Build release APK ────────────────────────────────────────────────
+      #    GEMINI_API_KEY is stored as a GitHub Secret.
+      #    Go to: Settings → Secrets and variables → Actions → New repository secret
+      #    Name:  GEMINI_API_KEY
+      #    Value: your AIza... key from aistudio.google.com/app/apikey
+      - name: Build release APK
+        run: |
+          flutter build apk \
+            --release \
+            --dart-define=GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+        working-directory: roman_urdu_agent
+
+      # ── 8. Rename APK with build number for clarity ─────────────────────────
+      - name: Rename APK
+        run: |
+          mkdir -p artifacts
+          cp roman_urdu_agent/build/app/outputs/flutter-apk/app-release.apk \
+             artifacts/roman-urdu-agent-${{ github.run_number }}.apk
+
+      # ── 9. Upload artifact — downloadable from Actions page ─────────────────
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: roman-urdu-agent-apk
+          path: artifacts/roman-urdu-agent-${{ github.run_number }}.apk
+          retention-days: 30        # Artifact kept for 30 days
+
+      # ── 10. Print download instructions ─────────────────────────────────────
+      - name: Build complete
+        run: |
+          echo "✅ APK built successfully!"
+          echo "📥 To download: go to Actions tab → this workflow run → Artifacts section"
+          echo "   File: roman-urdu-agent-${{ github.run_number }}.apk"

@@ -1,0 +1,43 @@
+name: roman_urdu_agent
+description: Roman Urdu Task Agent — voice/text to device actions via ML Kit + Gemini.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Speech-to-Text
+  speech_to_text: ^6.6.2
+
+  # Google ML Kit Entity Extraction
+  google_mlkit_entity_extraction: ^0.13.0
+
+  # HTTP client for Gemini API
+  http: ^1.2.1
+
+  # Local notifications (alarm / reminder delivery)
+  flutter_local_notifications: ^17.2.2
+
+  # Timezone support for scheduled notifications
+  timezone: ^0.9.4
+
+  # Text-to-Speech confirmation readback
+  flutter_tts: ^4.0.2
+
+  # Runtime permission handling
+  permission_handler: ^11.3.1
+
+  # Date/time formatting
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
