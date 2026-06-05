@@ -446,10 +446,6 @@ class _ThinkingDotsState extends State<_ThinkingDots>
       builder: (_, __) {
         return Row(
           children: List.generate(3, (i) {
-            final t = (_c.value - i * 0.15).clamp(0.0, 1.0);
-            final opacity = (0.5 * (1 + (t * 2 * 3.14159).hashCode % 2 == 0 ? 1.0 : -1.0))
-                .clamp(0.15, 1.0);
-            // Simple alternating opacity based on index offset
             final phase = (_c.value + i / 3.0) % 1.0;
             final alpha = phase < 0.5 ? 1.0 : 0.2;
             return Container(

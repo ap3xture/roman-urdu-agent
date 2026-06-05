@@ -11,7 +11,7 @@ class MlKitExtractor {
   Future<void> ensureModelReady() async {
     if (_isModelDownloaded) return;
     // Warm up extractor — triggers model download on first run (needs internet)
-    await _extractor.extractEntities('test 10 AM tomorrow');
+    await _extractor.annotateText('test 10 AM tomorrow');
     _isModelDownloaded = true;
   }
 
@@ -67,7 +67,7 @@ class MlKitExtractor {
 
     List<EntityAnnotation> annotations = [];
     try {
-      annotations = await _extractor.extractEntities(normalized);
+      annotations = await _extractor.annotateText(normalized);
     } catch (_) {
       // Model not yet downloaded or no entities found — Gemini handles intent anyway
     }

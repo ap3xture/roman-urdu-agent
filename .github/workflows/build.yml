@@ -43,15 +43,21 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: ${{ runner.os }}-gradle-
 
-      # ── 5. Dependencies ─────────────────────────────────────────────────────
+      # ── 5. Create local.properties (Flutter Gradle plugin requires it) ───────
+      - name: Create android/local.properties
+        run: |
+          echo "flutter.sdk=$FLUTTER_ROOT" > android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> android/local.properties
+
+      # ── 6. Dependencies ─────────────────────────────────────────────────────
       - name: Install Flutter dependencies
         run: flutter pub get
 
-      # ── 6. Analyze (non-blocking — shows warnings but won't fail the build) ─
+      # ── 7. Analyze (non-blocking — shows warnings but won't fail the build) ─
       - name: Analyze code
         run: flutter analyze --no-fatal-infos || true
 
-      # ── 7. Build release APK ────────────────────────────────────────────────
+      # ── 8. Build release APK ────────────────────────────────────────────────
       #    GEMINI_API_KEY is stored as a GitHub Secret.
       #    Go to: Settings → Secrets and variables → Actions → New repository secret
       #    Name:  GEMINI_API_KEY

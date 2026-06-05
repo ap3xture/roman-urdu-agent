@@ -70,7 +70,7 @@ class AgentController {
       localeId: 'ur_PK',
       listenFor: const Duration(seconds: 10),
       pauseFor: const Duration(seconds: 3),
-      cancelOnError: false,
+      listenOptions: SpeechListenOptions(cancelOnError: false),
     );
   }
 
@@ -211,7 +211,8 @@ class AgentController {
       tzScheduled,
       details,
       androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-      matchDateTimeComponents: null,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
     );
   }
 
