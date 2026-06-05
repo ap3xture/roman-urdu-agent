@@ -15,8 +15,6 @@ class AgentController {
   final _tts = FlutterTts();
   final _extractor = MlKitExtractor();
   final _gemini = GeminiService();
-
-  // Only used for timers — alarms/reminders go to native Clock/Calendar
   final _notifications = FlutterLocalNotificationsPlugin();
 
   bool _sttReady = false;
@@ -87,14 +85,14 @@ class AgentController {
   Future<String> _execute(AgentIntent intent, ExtractedEntities entities) async {
     switch (intent.intent) {
 
-      // ── Native Clock alarm ─────────────────────────────────────────────────
+      // ── Alarm ──────────────────────────────────────────────────────────────
       case IntentType.setAlarm:
         final time = _resolveTime(intent.timeString, entities.dateTime);
-        if (time == null) {
-          return await _say('Waqt samajh nahi aaya. Dobara bolein.');
-        }
+        if (time == null) return await _say('Waqt samajh nahi aaya. Dobara bolein.');
+
+        bool usedNative = false;
         if (!kIsWeb) {
-          await AndroidIntent(
+          usedNative = await _launchIntent(AndroidIntent(
             action: 'android.intent.action.SET_ALARM',
             arguments: <String, dynamic>{
               'android.intent.extra.alarm.HOUR': time.hour,
@@ -103,49 +101,88 @@ class AgentController {
               'android.intent.extra.alarm.SKIP_UI': false,
               'android.intent.extra.alarm.VIBRATE': true,
             },
-          ).launch();
+          ));
         }
-        return await _say('Clock app mein alarm set ho raha hai ${_fmt(time)} ke liye.');
+        // Fallback: in-app scheduled notification
+        if (!usedNative) {
+          await _scheduleNotification(
+            id: time.millisecondsSinceEpoch ~/ 1000,
+            title: 'Alarm',
+            body: 'Aapka alarm baj raha hai!',
+            scheduledTime: time,
+          );
+        }
+        return await _say(
+          usedNative
+              ? 'Clock app mein alarm set ho raha hai ${_fmt(time)} ke liye.'
+              : 'Alarm set ho gaya ${_fmt(time)} ke liye.',
+        );
 
-      // ── Native Calendar reminder ───────────────────────────────────────────
+      // ── Reminder ───────────────────────────────────────────────────────────
       case IntentType.setReminder:
         final time = _resolveTime(intent.timeString, entities.dateTime);
-        if (time == null) {
-          return await _say('Waqt samajh nahi aaya. Dobara bolein.');
-        }
+        if (time == null) return await _say('Waqt samajh nahi aaya. Dobara bolein.');
         final title = intent.message ?? 'Reminder';
+
+        bool usedNative = false;
         if (!kIsWeb) {
-          await AndroidIntent(
+          usedNative = await _launchIntent(AndroidIntent(
             action: 'android.intent.action.INSERT',
             type: 'vnd.android.cursor.item/event',
             arguments: <String, dynamic>{
               'title': title,
               'beginTime': time.millisecondsSinceEpoch,
-              'endTime': time.add(const Duration(minutes: 30)).millisecondsSinceEpoch,
+              'endTime':
+                  time.add(const Duration(minutes: 30)).millisecondsSinceEpoch,
               'allDay': false,
               'description': 'Set by Roman Urdu Agent',
             },
-          ).launch();
+          ));
         }
-        return await _say('Calendar mein reminder add ho raha hai: "$title" — ${_fmt(time)} ke liye.');
+        if (!usedNative) {
+          await _scheduleNotification(
+            id: time.millisecondsSinceEpoch ~/ 1000 + 1,
+            title: 'Reminder: $title',
+            body: title,
+            scheduledTime: time,
+          );
+        }
+        return await _say(
+          usedNative
+              ? 'Calendar mein "$title" add ho raha hai — ${_fmt(time)} ke liye.'
+              : 'Reminder set ho gaya: "$title" — ${_fmt(time)} ke liye.',
+        );
 
-      // ── Native Clock timer ─────────────────────────────────────────────────
+      // ── Timer ──────────────────────────────────────────────────────────────
       case IntentType.setTimer:
         final mins = intent.durationMinutes ?? 0;
-        if (mins <= 0) {
-          return await _say('Timer ki muddat samajh nahi aayi.');
-        }
+        if (mins <= 0) return await _say('Timer ki muddat samajh nahi aayi.');
+
+        bool usedNative = false;
         if (!kIsWeb) {
-          await AndroidIntent(
+          usedNative = await _launchIntent(AndroidIntent(
             action: 'android.intent.action.SET_TIMER',
             arguments: <String, dynamic>{
               'android.intent.extra.alarm.LENGTH': mins * 60,
               'android.intent.extra.alarm.MESSAGE': 'Roman Urdu Agent Timer',
               'android.intent.extra.alarm.SKIP_UI': false,
             },
-          ).launch();
+          ));
         }
-        return await _say('Clock app mein $mins minute ka timer set ho raha hai.');
+        if (!usedNative) {
+          final fireAt = DateTime.now().add(Duration(minutes: mins));
+          await _scheduleNotification(
+            id: fireAt.millisecondsSinceEpoch ~/ 1000 + 2,
+            title: 'Timer khatam!',
+            body: '$mins minute poore ho gaye!',
+            scheduledTime: fireAt,
+          );
+        }
+        return await _say(
+          usedNative
+              ? 'Clock app mein $mins minute ka timer set ho raha hai.'
+              : '$mins minute ka timer shuru ho gaya.',
+        );
 
       // ── General chat ───────────────────────────────────────────────────────
       case IntentType.chat:
@@ -155,8 +192,48 @@ class AgentController {
       // ── Unknown ────────────────────────────────────────────────────────────
       case IntentType.unknown:
         return await _say(
-            'Yeh samajh nahi aaya. Alarm, reminder, timer set kar sakte hain, ya kuch bhi pooch sakte hain.');
+            'Kuch bhi pooch sakte hain, ya alarm, reminder, ya timer set kar sakte hain.');
     }
+  }
+
+  /// Tries to launch a native Android intent.
+  /// Returns true on success, false if the intent is not handled on this device.
+  Future<bool> _launchIntent(AndroidIntent intent) async {
+    try {
+      await intent.launch();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Schedules a local notification as fallback when native intent fails.
+  Future<void> _scheduleNotification({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+  }) async {
+    const androidDetails = AndroidNotificationDetails(
+      'roman_urdu_agent_channel',
+      'Roman Urdu Agent',
+      channelDescription: 'Alarms and reminders from Roman Urdu Agent',
+      importance: Importance.max,
+      priority: Priority.high,
+      playSound: true,
+      enableVibration: true,
+    );
+    final tzScheduled = tz.TZDateTime.from(scheduledTime, tz.local);
+    await _notifications.zonedSchedule(
+      id,
+      title,
+      body,
+      tzScheduled,
+      const NotificationDetails(android: androidDetails),
+      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      uiLocalNotificationDateInterpretation:
+          UILocalNotificationDateInterpretation.absoluteTime,
+    );
   }
 
   DateTime? _resolveTime(String? geminiTime, DateTime? mlKitTime) {
