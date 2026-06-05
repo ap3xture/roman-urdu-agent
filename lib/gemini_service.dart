@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-// API key injected at build time via --dart-define=GEMINI_API_KEY=...
 const String _apiKey = String.fromEnvironment('GEMINI_API_KEY');
 
 class GeminiService {
@@ -13,16 +12,16 @@ class GeminiService {
   Future<AgentIntent> classifyIntent(
     String input, {
     String? normalizedHint,
+    String? runtimeContext, // date/time/battery injected by AgentController
   }) async {
-    if (_apiKey.isEmpty) {
-      throw GeminiException('GEMINI_API_KEY not set.');
-    }
+    if (_apiKey.isEmpty) throw GeminiException('GEMINI_API_KEY not set.');
 
-    final hintLine = normalizedHint != null
-        ? 'ML Kit normalized: "$normalizedHint"\n'
-        : '';
+    final hintLine =
+        normalizedHint != null ? 'ML Kit normalized: "$normalizedHint"\n' : '';
+    final contextBlock = runtimeContext != null ? '$runtimeContext\n' : '';
+
     final prompt =
-        '$_kSystemPrompt\n\n${_realtimeContext()}${hintLine}User: "$input"\n\nReturn JSON only.';
+        '$_kSystemPrompt\n\n$contextBlock${hintLine}User: "$input"\n\nReturn JSON only.';
 
     final body = jsonEncode({
       'contents': [
@@ -32,10 +31,7 @@ class GeminiService {
           ]
         }
       ],
-      'generationConfig': {
-        'temperature': 0.4,   // slightly higher — better for chat responses
-        'maxOutputTokens': 512,
-      },
+      'generationConfig': {'temperature': 0.4, 'maxOutputTokens': 512},
     });
 
     final uri = Uri.parse('$_baseUrl?key=$_apiKey');
@@ -44,8 +40,7 @@ class GeminiService {
         .timeout(const Duration(seconds: 20));
 
     if (response.statusCode != 200) {
-      throw GeminiException(
-          'API error ${response.statusCode}: ${response.body}');
+      throw GeminiException('API error ${response.statusCode}: ${response.body}');
     }
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
@@ -71,41 +66,72 @@ class GeminiService {
 
 // ─── Intent model ─────────────────────────────────────────────────────────────
 
-enum IntentType { setAlarm, setReminder, setTimer, chat, unknown }
+enum IntentType {
+  setAlarm,
+  setReminder,
+  setTimer,
+  makeCall,
+  openWhatsApp,
+  navigate,
+  webSearch,
+  openYoutube,
+  openCamera,
+  openSettings,
+  chat,
+  unknown,
+}
 
 class AgentIntent {
   final IntentType intent;
+  // task fields
   final String? timeString;
-  final String? message;
   final int? durationMinutes;
-  final String? response;   // populated for CHAT intent
+  final String? message;
+  // action fields
+  final String? phone;
+  final String? query;
+  final String? settingType;
+  // chat
+  final String? response;
   final String raw;
 
   const AgentIntent({
     required this.intent,
     required this.raw,
     this.timeString,
-    this.message,
     this.durationMinutes,
+    this.message,
+    this.phone,
+    this.query,
+    this.settingType,
     this.response,
   });
 
-  factory AgentIntent.fromJson(Map<String, dynamic> json) {
-    final intentStr = (json['intent'] as String? ?? '').toUpperCase();
-    final intent = switch (intentStr) {
+  factory AgentIntent.fromJson(Map<String, dynamic> j) {
+    final intent = switch ((j['intent'] as String? ?? '').toUpperCase()) {
       'SET_ALARM' => IntentType.setAlarm,
       'SET_REMINDER' => IntentType.setReminder,
       'SET_TIMER' => IntentType.setTimer,
+      'MAKE_CALL' => IntentType.makeCall,
+      'OPEN_WHATSAPP' => IntentType.openWhatsApp,
+      'NAVIGATE' => IntentType.navigate,
+      'WEB_SEARCH' => IntentType.webSearch,
+      'OPEN_YOUTUBE' => IntentType.openYoutube,
+      'OPEN_CAMERA' => IntentType.openCamera,
+      'OPEN_SETTINGS' => IntentType.openSettings,
       'CHAT' => IntentType.chat,
       _ => IntentType.unknown,
     };
     return AgentIntent(
       intent: intent,
-      timeString: json['time'] as String?,
-      message: json['message'] as String?,
-      durationMinutes: json['duration_minutes'] as int?,
-      response: json['response'] as String?,
-      raw: json.toString(),
+      timeString: j['time'] as String?,
+      durationMinutes: j['duration_minutes'] as int?,
+      message: j['message'] as String?,
+      phone: j['phone'] as String?,
+      query: j['query'] as String?,
+      settingType: j['setting_type'] as String?,
+      response: j['response'] as String?,
+      raw: j.toString(),
     );
   }
 }
@@ -117,134 +143,113 @@ class GeminiException implements Exception {
   String toString() => 'GeminiException: $message';
 }
 
-// ─── Real-time context ────────────────────────────────────────────────────────
-
-String _realtimeContext() {
-  final now = DateTime.now();
-
-  const days = [
-    'Monday', 'Tuesday', 'Wednesday', 'Thursday',
-    'Friday', 'Saturday', 'Sunday'
-  ];
-  const months = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
-  const urduDays = [
-    'Somwar', 'Mangal', 'Budh', 'Jumerat',
-    'Jumma', 'Hafta', 'Itwar'
-  ];
-
-  final dayEn  = days[now.weekday - 1];
-  final dayUr  = urduDays[now.weekday - 1];
-  final month  = months[now.month - 1];
-  final hour12 = now.hour == 0 ? 12 : (now.hour > 12 ? now.hour - 12 : now.hour);
-  final amPm   = now.hour < 12 ? 'AM' : 'PM';
-  final amPmUr = now.hour < 12 ? 'Subah' : (now.hour < 17 ? 'Dopahar' : (now.hour < 20 ? 'Sham' : 'Raat'));
-  final min    = now.minute.toString().padLeft(2, '0');
-  final time24 = '${now.hour.toString().padLeft(2, '0')}:$min';
-
-  return '''
---- REAL-TIME DEVICE DATA (injected at request time) ---
-Current time  : $hour12:$min $amPm  ($time24 in 24h)  [$amPmUr]
-Current date  : $dayEn, ${now.day} $month ${now.year}
-Day (English) : $dayEn
-Day (Roman Urdu): $dayUr
----
-
-''';
-}
-
 // ─── System prompt ────────────────────────────────────────────────────────────
 
-const String _kSystemPrompt = '''
-You are a smart voice assistant with access to real-time device data.
+const String _kSystemPrompt = r'''
+You are a smart Android voice assistant with access to real-time device data.
+A REAL-TIME DEVICE DATA block is injected at the top of each request — use it
+for time, date, battery, and day questions.
 
-At the start of each request you receive a block of REAL-TIME DEVICE DATA
-(current time, date, day of week). Use it to answer time/date questions accurately.
+Always return a SINGLE JSON object. No markdown. No explanation.
 
-You handle two types of input:
-1. TASK commands in Roman Urdu (set alarms, reminders, timers)
-2. GENERAL questions or conversation in any language
-
-Always return a single JSON object — no markdown, no explanation, nothing else.
-
-OUTPUT SCHEMA:
+─── OUTPUT SCHEMA ───
 {
-  "intent": "SET_ALARM" | "SET_REMINDER" | "SET_TIMER" | "CHAT" | "UNKNOWN",
+  "intent": one of the values below,
   "time": "HH:mm" | null,
-  "message": "string" | null,
   "duration_minutes": integer | null,
-  "response": "string" | null
+  "message": string | null,
+  "phone": string (digits only) | null,
+  "query": string | null,
+  "setting_type": "wifi" | "bluetooth" | "mobile_data" | "display" | "sound" | "general" | null,
+  "response": string | null
 }
 
-RULES FOR TASKS:
-- "baje" = o\'clock. "saat baje" = "07:00"
-- "subah" = AM, "sham"/"raat" = PM. "saat baje sham" = "19:00"
-- Numbers: ek=1, do=2, teen=3, char=4, paanch=5, chhe=6, saat=7, aath=8, nau=9, das=10, gyarah=11, barah=12
-- "aadhay ghantay" = 30 min, "ek ghanta" = 60 min, "do ghante" = 120 min
-- "yaad dilao" / "reminder" → SET_REMINDER
-- "alarm" / "jagao" → SET_ALARM
-- "timer" / duration + "baad" → SET_TIMER
-- For tasks: response field = null
+─── INTENTS ───
+SET_ALARM        → set alarm in Clock app
+SET_REMINDER     → add event in Calendar app
+SET_TIMER        → start countdown timer in Clock app
+MAKE_CALL        → dial / call a phone number
+OPEN_WHATSAPP    → open WhatsApp (optionally to a number with a message)
+NAVIGATE         → open Google Maps to a destination
+WEB_SEARCH       → search the web on Google
+OPEN_YOUTUBE     → search or play on YouTube
+OPEN_CAMERA      → open device camera
+OPEN_SETTINGS    → open a device settings page
+CHAT             → general question / conversation (put answer in "response")
+UNKNOWN          → cannot determine intent
 
-RULES FOR CHAT:
-- Any general question, greeting, or conversation → CHAT intent
-- Put your answer in the "response" field
-- Keep response under 3 sentences (it will be read aloud by TTS)
-- You may respond in English or Roman Urdu — match the user\'s language
-- All task fields (time, message, duration_minutes) = null for CHAT
+─── ROMAN URDU RULES ───
+Time:
+  "baje" = o'clock | ek=1 do=2 teen=3 char=4 paanch=5 chhe=6 saat=7 aath=8 nau=9 das=10 gyarah=11 barah=12
+  subah=AM | sham/raat=PM | dopahar=noon-PM
+Duration:
+  aadhay ghantay=30min | ek ghanta=60min | do ghante=120min
+Actions:
+  "alarm/jagao" → SET_ALARM
+  "yaad dilao/reminder" → SET_REMINDER
+  "timer" → SET_TIMER
+  "call karo/phone karo/ring karo" → MAKE_CALL
+  "WhatsApp karo/WhatsApp pe bhejo" → OPEN_WHATSAPP
+  "rasta dikhao/navigate/maps" → NAVIGATE
+  "search karo/dhundo/Google pe" → WEB_SEARCH
+  "YouTube pe/video dhundo" → OPEN_YOUTUBE
+  "camera/selfie/photo" → OPEN_CAMERA
+  "settings kholo/WiFi/Bluetooth/silent mode" → OPEN_SETTINGS
+  anything else → CHAT
 
-EXAMPLES:
+─── EXAMPLES ───
 
 Input: "mera alarm 7 baje set karo"
-Output: {"intent":"SET_ALARM","time":"07:00","message":null,"duration_minutes":null,"response":null}
-
-Input: "subah 6 baje alarm lagao"
-Output: {"intent":"SET_ALARM","time":"06:00","message":null,"duration_minutes":null,"response":null}
-
-Input: "raat 10 baje alarm"
-Output: {"intent":"SET_ALARM","time":"22:00","message":null,"duration_minutes":null,"response":null}
+Output: {"intent":"SET_ALARM","time":"07:00","duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":null,"response":null}
 
 Input: "sham 5 baje meeting ka reminder"
-Output: {"intent":"SET_REMINDER","time":"17:00","message":"meeting","duration_minutes":null,"response":null}
+Output: {"intent":"SET_REMINDER","time":"17:00","duration_minutes":null,"message":"meeting","phone":null,"query":null,"setting_type":null,"response":null}
 
-Input: "barah baje lunch ka reminder set karo"
-Output: {"intent":"SET_REMINDER","time":"12:00","message":"lunch","duration_minutes":null,"response":null}
+Input: "30 minute ka timer"
+Output: {"intent":"SET_TIMER","time":null,"duration_minutes":30,"message":null,"phone":null,"query":null,"setting_type":null,"response":null}
 
-Input: "30 minute ka timer lagao"
-Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":30,"response":null}
+Input: "03001234567 pe call karo"
+Output: {"intent":"MAKE_CALL","time":null,"duration_minutes":null,"message":null,"phone":"03001234567","query":null,"setting_type":null,"response":null}
 
-Input: "ek ghanta baad yaad karna"
-Output: {"intent":"SET_TIMER","time":null,"message":null,"duration_minutes":60,"response":null}
+Input: "Ali ko WhatsApp karo"
+Output: {"intent":"OPEN_WHATSAPP","time":null,"duration_minutes":null,"message":"Ali ko","phone":null,"query":null,"setting_type":null,"response":null}
 
-Input: "hello, how are you?"
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"I\'m doing great, ready to help you! You can ask me anything or say a command like set an alarm."}
+Input: "0311 ko WhatsApp pe salam bhejo"
+Output: {"intent":"OPEN_WHATSAPP","time":null,"duration_minutes":null,"message":"salam","phone":"0311","query":null,"setting_type":null,"response":null}
+
+Input: "Lahore ka rasta dikhao"
+Output: {"intent":"NAVIGATE","time":null,"duration_minutes":null,"message":null,"phone":null,"query":"Lahore","setting_type":null,"response":null}
+
+Input: "nearest hospital maps pe dikhao"
+Output: {"intent":"NAVIGATE","time":null,"duration_minutes":null,"message":null,"phone":null,"query":"nearest hospital","setting_type":null,"response":null}
+
+Input: "cricket score Google pe search karo"
+Output: {"intent":"WEB_SEARCH","time":null,"duration_minutes":null,"message":null,"phone":null,"query":"cricket score","setting_type":null,"response":null}
+
+Input: "Atif Aslam ka gana YouTube pe lagao"
+Output: {"intent":"OPEN_YOUTUBE","time":null,"duration_minutes":null,"message":null,"phone":null,"query":"Atif Aslam","setting_type":null,"response":null}
+
+Input: "camera kholo"
+Output: {"intent":"OPEN_CAMERA","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":null,"response":null}
+
+Input: "WiFi settings kholo"
+Output: {"intent":"OPEN_SETTINGS","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":"wifi","response":null}
+
+Input: "Bluetooth on karo"
+Output: {"intent":"OPEN_SETTINGS","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":"bluetooth","response":null}
+
+Input: "phone silent karo"
+Output: {"intent":"OPEN_SETTINGS","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":"sound","response":null}
+
+Input: "kitne baje hain?" (use REAL-TIME DEVICE DATA for answer)
+Output: {"intent":"CHAT","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":null,"response":"Abhi 3:45 baj rahe hain, Sham ka waqt hai."}
+
+Input: "battery kitni hai?" (use REAL-TIME DEVICE DATA for answer)
+Output: {"intent":"CHAT","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":null,"response":"Aapki battery 72% hai aur charge ho rahi hai."}
+
+Input: "aaj kon sa din hai?"
+Output: {"intent":"CHAT","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":null,"response":"Aaj Jumma hai."}
 
 Input: "Pakistan ki capital kya hai?"
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Pakistan ki capital Islamabad hai."}
-
-Input: "tell me a joke"
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Why do programmers prefer dark mode? Because light attracts bugs!"}
-
-Input: "aaj ka mausam kaisa hai?"
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Mujhe real-time mausam ka data nahi milta, lekin aap weather app check kar sakte hain."}
-
-Input: "what is 25 multiplied by 4"
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"25 multiplied by 4 is 100."}
-
-Input: "kitne baje hain?" (assume real-time context shows 3:45 PM)
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Abhi 3:45 baj rahe hain, Sham ka waqt hai."}
-
-Input: "what time is it?" (assume real-time context shows 9:10 AM)
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"It is currently 9:10 AM."}
-
-Input: "aaj kon sa din hai?" (assume real-time context shows Friday)
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Aaj Jumma hai."}
-
-Input: "what is today's date?" (assume real-time context shows 6 June 2026)
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Today is Friday, 6 June 2026."}
-
-Input: "kal kon sa din hoga?" (assume today is Friday)
-Output: {"intent":"CHAT","time":null,"message":null,"duration_minutes":null,"response":"Kal Hafta hoga."}
+Output: {"intent":"CHAT","time":null,"duration_minutes":null,"message":null,"phone":null,"query":null,"setting_type":null,"response":"Pakistan ki capital Islamabad hai."}
 ''';
